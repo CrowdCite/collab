@@ -1,0 +1,299 @@
+import { program } from "commander";
+import fs from "fs";
+import path from "path";
+import { latexParser as latex } from "latex-utensils";
+
+interface CLIOptions {
+    verbose: boolean;
+    files: string[];
+}
+
+export type DirectoryOrFilename = string;
+
+
+export function hasExtension(file: string, ext: string): boolean {
+    return path.extname(file) === ext;
+}
+
+export function filesInDirectory(dir: string) {
+    return fs.readdirSync(dir).map(file => path.join(dir, file));
+}
+
+export function collectFilesWithExtension(
+    arg: DirectoryOrFilename,
+    ext: string
+): string[] {
+    const stats = fs.statSync(arg);
+    let fileList: string[] = [];
+    if (stats.isFile() && hasExtension(arg, ext)) {
+        fileList = [arg];
+    } else if (stats.isDirectory()) {
+        fileList = filesInDirectory(arg).filter(file => hasExtension(file, ext));
+    }
+    return fileList;
+}
+
+
+function processArgs(argv: string[]): CLIOptions {
+    let files: string[] = [];
+    program
+        .version("0.1.0")
+        .option("-v, --verbose", "Verbose mode.")
+        .arguments("<dir|file.tex>")
+        .description(
+            "process the given `.tex` file or directory of files. Non-`.tex` files will be ignored. Output files are written next to the input files with the extension `.out`."
+        )
+        .action(async arg => {
+            try {
+                files = collectFilesWithExtension(arg, ".tex");
+            } catch (err: any) {
+                console.error(err);
+            }
+        });
+    program.parse(argv);
+    const options = program.opts();
+
+    return {
+        verbose: !!options.verbose,
+        files,
+    };
+}
+
+function sanityCheck(files: string[]) {
+    if (files.length === 0) {
+        program.help();
+    }
+}
+
+const SkipCommandName = [
+    "newcommand",
+    "documentstyle",
+    "singlespace",
+    "doublespace",
+    "epsscale",
+    "bigskip",
+    "maketitle"
+];
+const SkipCommandContents = ["plotone"];
+
+let verbose = false;
+
+function serializeNodes(nodes: latex.Node[], sep: string = ""): string {
+    const strings = [];
+    for (const node of nodes) {
+        verbose && strings.push(`${node.kind}[`);
+        switch (node.kind) {
+            case "text.string": {
+                strings.push(node.content);
+                break;
+            }
+            case "command": {
+                verbose && strings.push(`${node.name}`);
+                if (SkipCommandName.find(name => name === node.name)) {
+                    strings.push(`${serializeNodes(node.args, " ")}`);
+                    break;
+                }
+                strings.push(`\\${node.name} `);
+                if (!SkipCommandContents.find(name => name === node.name)) {
+                    if (node.args.length > 0) {
+                        strings.push(`${serializeNodes(node.args, " ")}`);
+                    }
+                }
+                break;
+            }
+            case "command.text": {
+                strings.push(serializeNodes([node.arg]));
+                break;
+            }
+            case "command.def": {
+                break;
+            }
+            case "command.url": {
+                strings.push(node.url);
+                break;
+            }
+            case "command.href": {
+                strings.push(node.url);
+                strings.push("\n");
+                strings.push(serializeNodes(node.content));
+                break;
+            }
+            case "command.label": {
+                if (node.name === "label") {
+                    strings.push(`\n`);
+                }
+                strings.push(`\\${node.name}{${node.label}}`);
+                if (node.name === "label") {
+                    strings.push(`\n`);
+                }
+                break;
+            }
+            case "env.math.align":
+            case "env.math.aligned":
+            case "env": {
+                strings.push(" ");
+                if (/abstract/i.test(node.name)) {
+                    strings.push("Abstract\n");
+                }
+                strings.push(`\n\\begin{${node.name}}\n`);
+                strings.push(serializeNodes(node.args));
+                strings.push(serializeNodes(node.content));
+                strings.push(`\n\\end{${node.name}}\n`);
+                break;
+            }
+            case "arg.group": {
+                strings.push("{");
+                strings.push(serializeNodes(node.content));
+                strings.push("}");
+                break;
+            }
+            case "arg.optional": {
+                strings.push(serializeNodes(node.content));
+                break;
+            }
+            case "parbreak": {
+                strings.push("\n\n");
+                break;
+            }
+            case "space": {
+                strings.push(" ");
+                break;
+            }
+            case "softbreak": {
+                strings.push("\n");
+                break;
+            }
+            case "linebreak": {
+                strings.push("\n\n");
+                break;
+            }
+            case "superscript": {
+                strings.push("^");
+                strings.push(serializeNodes(node.arg ? [node.arg] : []));
+                break;
+            }
+            case "subscript": {
+                strings.push("_");
+                strings.push(serializeNodes(node.arg ? [node.arg] : []));
+                break;
+            }
+            case "alignmentTab": {
+                strings.push("&");
+                break;
+            }
+            case "commandParameter": {
+                break;
+            }
+            case "activeCharacter": {
+                // ~ is a non-breaking space, not sure if this ast node
+                // represents other active characters. We assume space.
+                strings.push(" ");
+                break;
+            }
+            case "ignore": {
+                break;
+            }
+            case "verb": {
+                // \verb verbatim quoted string
+                strings.push(node.content);
+                break;
+            }
+            case "env.verbatim": {
+                //  verbatim quoted string
+                strings.push(node.content);
+                break;
+            }
+            case "env.minted": {
+                // Code highlighting package, basically verbatim
+                strings.push(node.content);
+                break;
+            }
+            case "env.lstlisting": {
+                // Code highlighting package, basically verbatim
+                strings.push(node.content);
+                break;
+            }
+            case "inlineMath": {
+                let mathContent = serializeNodes(node.content);
+                mathContent = mathContent.trimEnd();
+                strings.push(`\$${mathContent}\$`);
+                break;
+            }
+            case "displayMath": {
+                strings.push(`\n\\[\n`);
+                strings.push(serializeNodes(node.content));
+                strings.push(`\n\\]`);
+                break;
+            }
+            case "math.character": {
+                strings.push(node.content);
+                break;
+            }
+            case "math.matching_delimiters": {
+                strings.push(`\\left${node.left}`);
+                strings.push(serializeNodes(node.content));
+                strings.push(`\\right${node.right}`);
+                break;
+            }
+            case "math.math_delimiters": {
+                if (node.lcommand !== "") {
+                    strings.push(`\\${node.lcommand}`);
+                }
+                strings.push(node.left);
+                strings.push(serializeNodes(node.content));
+                if (node.rcommand !== "") {
+                    strings.push(`\\${node.rcommand}`);
+                }
+                strings.push(node.right);
+                break;
+            }
+            default:
+                throw new Error(`Unknown node kind: ${(node as any).kind}`);
+        }
+        verbose && strings.push("]");
+    }
+    return strings.join(sep);
+}
+
+function cleanup(fileContents: string) {
+    let inMath = false;
+    let rv = "";
+    for (const segment of fileContents.split(/(\$\$)/)) {
+        if (segment === "$$") {
+            if (inMath) {
+                inMath = false;
+                // The newline ensures that what comes afterwards isn't parsed
+                // as part of the \] command.
+                rv += "\\]";
+            } else {
+                inMath = true;
+                rv += "\\[";
+            }
+        } else {
+            rv += segment;
+        }
+    }
+    return rv;
+}
+
+function processLatexFiles(opts: CLIOptions) {
+    const { files } = opts;
+    for (const file of files) {
+        const latexContents = fs.readFileSync(file, "utf8");
+        const cleanedUpLatex = cleanup(latexContents);
+        const parsed = latex.parse(cleanedUpLatex);
+
+        const {dir, name} = path.parse(file);
+        const outputFile = `${dir}/${name}.out`
+        fs.writeFileSync(outputFile, serializeNodes(parsed.content));
+        console.log(`Wrote ${outputFile}`);
+    }
+}
+
+function main() {
+    const opts = processArgs(process.argv);
+    sanityCheck(opts.files);
+    processLatexFiles(opts);
+}
+
+main();
