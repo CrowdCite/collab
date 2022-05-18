@@ -284,7 +284,7 @@ function processLatexFiles(opts: CLIOptions) {
         const parsed = latex.parse(cleanedUpLatex);
 
         const {dir, name} = path.parse(file);
-        const outputFile = `${dir}/${name}.out`
+        const outputFile = `${dir}/${name}.out.tex`
         fs.writeFileSync(outputFile, serializeNodes(parsed.content));
         console.log(`Wrote ${outputFile}`);
     }
