@@ -5,6 +5,7 @@
         "lib": ["ES2020"],
         "outDir": "./build",
         "rootDir": "src",
+        "tsBuildInfoFile": "./build/tsconfig.tsbuildinfo",
         "allowUnreachableCode": false,
         "allowUnusedLabels": false,
         "composite": true,
