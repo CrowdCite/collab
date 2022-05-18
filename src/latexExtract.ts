@@ -4,7 +4,6 @@ import path from "path";
 import { latexParser as latex } from "latex-utensils";
 import assert from "assert";
 
-
 interface AuthorStructure {
     name: string;
     email: string;
