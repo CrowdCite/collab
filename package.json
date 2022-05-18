@@ -16,5 +16,13 @@
     "devDependencies": {
         "@types/node": "^17.0.34",
         "typescript": "^4.2.4"
+    },
+    "prettier": {
+        "printWidth": 90,
+        "tabWidth": 4,
+        "useTabs": false,
+        "arrowParens": "avoid",
+        "trailingComma": "none",
+        "htmlWhitespaceSensitivity": "ignore"
     }
 }
