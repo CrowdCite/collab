@@ -117,7 +117,9 @@ function processArgs(argv: string[]): CLIOptions {
         )
         .action(async arg => {
             try {
-                files = collectFilesWithExtension(arg, ".tex");
+                files = collectFilesWithExtension(arg, ".tex").filter(
+                    file => !file.endsWith(".out.tex")
+                );
             } catch (err: any) {
                 console.error(err);
             }
