@@ -1,4 +1,4 @@
-name: yu
+name: dev
 channels:
   - conda-forge
   - defaults
@@ -15,4 +15,4 @@ dependencies:
   - nodejs=17.9.0=h8839609_0
   - openssl=3.0.3=h166bdaf_0
   - zlib=1.2.11=h166bdaf_1014
-prefix: /home/yugai/disk1/miniconda3/envs/yu
+prefix: /mnt/disk1/yugai/miniconda3/envs/dev
