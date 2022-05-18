@@ -1,0 +1,18 @@
+name: yu
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - _libgcc_mutex=0.1=conda_forge
+  - _openmp_mutex=4.5=2_gnu
+  - ca-certificates=2021.10.8=ha878542_0
+  - icu=70.1=h27087fc_0
+  - libgcc-ng=12.1.0=h8d9b700_16
+  - libgomp=12.1.0=h8d9b700_16
+  - libstdcxx-ng=12.1.0=ha89aaad_16
+  - libuv=1.43.0=h7f98852_0
+  - libzlib=1.2.11=h166bdaf_1014
+  - nodejs=17.9.0=h8839609_0
+  - openssl=3.0.3=h166bdaf_0
+  - zlib=1.2.11=h166bdaf_1014
+prefix: /home/yugai/disk1/miniconda3/envs/yu
