@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 import { latexParser as latex } from "latex-utensils";
 import assert from "assert";
-
+import { collectFilesWithExtensions } from "./shared";
 
 interface AuthorStructure {
     name: string;
@@ -83,30 +83,6 @@ function simplifyDocumentStructure(doc: PdfDocumentStructure) {
     };
 }
 
-export type DirectoryOrFilename = string;
-
-export function hasExtension(file: string, ext: string): boolean {
-    return path.extname(file) === ext;
-}
-
-export function filesInDirectory(dir: string) {
-    return fs.readdirSync(dir).map(file => path.join(dir, file));
-}
-
-export function collectFilesWithExtension(
-    arg: DirectoryOrFilename,
-    ext: string
-): string[] {
-    const stats = fs.statSync(arg);
-    let fileList: string[] = [];
-    if (stats.isFile() && hasExtension(arg, ext)) {
-        fileList = [arg];
-    } else if (stats.isDirectory()) {
-        fileList = filesInDirectory(arg).filter(file => hasExtension(file, ext));
-    }
-    return fileList;
-}
-
 function processArgs(argv: string[]): CLIOptions {
     let files: string[] = [];
     program
@@ -118,8 +94,10 @@ function processArgs(argv: string[]): CLIOptions {
         )
         .action(async arg => {
             try {
-                files = collectFilesWithExtension(arg, ".tex").filter(
-                    file => !file.endsWith(".out.tex")
+                files.push(
+                    ...collectFilesWithExtensions(arg, [".tex", ".pdf"]).filter(
+                        file => !file.endsWith(".out.tex")
+                    )
                 );
             } catch (err: any) {
                 console.error(err);

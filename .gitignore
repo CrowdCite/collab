@@ -106,3 +106,5 @@ dist
 build/
 
 examples/*.out.tex
+
+merged/

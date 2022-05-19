@@ -8,6 +8,10 @@ Setup is done by using Conda (miniconda - no default packages are included). The
     $ bash Miniconda3-latest-Linux-x86_64.sh
     $ conda env create -f dev.yml
 
+# Activate the environment
+
+    $ conda activate dev
+
 # Building
 
     $ npm install
