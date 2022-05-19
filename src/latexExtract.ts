@@ -4,6 +4,7 @@ import path from "path";
 import { latexParser as latex } from "latex-utensils";
 import assert from "assert";
 import { collectFilesWithExtensions } from "./shared";
+import pLimit from "p-limit";
 
 interface AuthorStructure {
     name: string;
@@ -57,6 +58,7 @@ interface PdfDocumentStructure {
 
 interface CLIOptions {
     verbose: boolean;
+    concurrency: number;
     files: string[];
 }
 
@@ -82,12 +84,17 @@ function simplifyDocumentStructure(doc: PdfDocumentStructure) {
         title
     };
 }
-
+import os from "os";
 function processArgs(argv: string[]): CLIOptions {
     let files: string[] = [];
     program
         .version("0.1.0")
         .option("-v, --verbose", "Verbose mode.")
+        .option(
+            `-j, --jobs <n>", "Number of parallel jobs to run. Defaults to ${
+                os.cpus().length
+            }.`
+        )
         .arguments("<dir|file.tex>")
         .description(
             "process the given `.tex` file or directory of files. Non-`.tex` files will be ignored. Output files are written next to the input files with the extension `.out`."
@@ -106,8 +113,13 @@ function processArgs(argv: string[]): CLIOptions {
     program.parse(argv);
     const options = program.opts();
 
+    let concurrency = Number(options.jobs ?? os.cpus().length);
+    if (Number.isNaN(concurrency)) {
+        concurrency = 1;
+    }
     return {
         verbose: !!options.verbose,
+        concurrency,
         files
     };
 }
@@ -568,24 +580,38 @@ function cleanup(fileContents: string) {
     return rv;
 }
 
-function processLatexFiles(opts: CLIOptions) {
+async function processLatexFiles(opts: CLIOptions) {
     const { files } = opts;
+    const limit = pLimit(opts.concurrency);
+    const promises = [];
     for (const file of files) {
-        console.log(`latexExtract ${file}`);
-        const latexContents = fs.readFileSync(file, "utf8");
-        const cleanedUpLatex = cleanup(latexContents);
-        const parsed = latex.parse(cleanedUpLatex);
+        promises.push(
+            limit(() => {
+                try {
+                    console.log(`latexExtract ${file}`);
+                    const latexContents = fs.readFileSync(file, "utf8");
+                    const cleanedUpLatex = cleanup(latexContents);
+                    const parsed = latex.parse(cleanedUpLatex);
 
-        const { dir, name } = path.parse(file);
-        const outputFile = `${dir}/${name}.out.tex`;
-        fs.writeFileSync(outputFile, serializeNodes(parsed.content));
-        console.log(`Wrote ${outputFile}`);
+                    const { dir, name } = path.parse(file);
+                    const outputFile = `${dir}/${name}.out.tex`;
+                    fs.writeFileSync(outputFile, serializeNodes(parsed.content));
+                    console.log(`Wrote ${outputFile}`);
 
-        const outputFileJson = `${dir}/${name}.json`;
-        const doc = extractDocumentStructure(parsed.content);
-        fs.writeFileSync(outputFileJson, JSON.stringify(simplifyDocumentStructure(doc)));
-        console.log(`Wrote ${outputFileJson}`);
+                    const outputFileJson = `${dir}/${name}.json`;
+                    const doc = extractDocumentStructure(parsed.content);
+                    fs.writeFileSync(
+                        outputFileJson,
+                        JSON.stringify(simplifyDocumentStructure(doc))
+                    );
+                    console.log(`Wrote ${outputFileJson}`);
+                } catch (err) {
+                    console.error(`Error processing ${file}: ${err}. Skipping.`);
+                }
+            })
+        );
     }
+    await Promise.all(promises);
 }
 
 function main() {
