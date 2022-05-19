@@ -95,7 +95,7 @@ function processArgs(argv: string[]): CLIOptions {
         .action(async arg => {
             try {
                 files.push(
-                    ...collectFilesWithExtensions(arg, [".tex", ".pdf"]).filter(
+                    ...collectFilesWithExtensions(arg, [".tex"]).filter(
                         file => !file.endsWith(".out.tex")
                     )
                 );
@@ -571,6 +571,7 @@ function cleanup(fileContents: string) {
 function processLatexFiles(opts: CLIOptions) {
     const { files } = opts;
     for (const file of files) {
+        console.log(`latexExtract ${file}`);
         const latexContents = fs.readFileSync(file, "utf8");
         const cleanedUpLatex = cleanup(latexContents);
         const parsed = latex.parse(cleanedUpLatex);
