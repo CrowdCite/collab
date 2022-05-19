@@ -20,3 +20,9 @@ Setup is done by using Conda (miniconda - no default packages are included). The
 # Running
 
     $ node build/latexExtract.js -h
+
+# Merging pdf and src latex directories
+
+    $ node build/mergePL.js <dir1> <dir2> ...
+
+Output is in merged/timestamp/\*.
