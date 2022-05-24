@@ -22,6 +22,7 @@ export class DataPrepStack extends Stack {
             deadLetterQueue: { queue: dlq, maxReceiveCount: 2 }
         });
 
+        // See https://docs.aws.amazon.com/cdk/api/v2/docs/aws-lambda-python-alpha-readme.html
         const dataPrepLambda = new pythonLambda.PythonFunction(this, "DataPrepLambda", {
             entry: "/path/to/my/function", // required
             runtime: aws_lambda.Runtime.PYTHON_3_8, // required
