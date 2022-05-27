@@ -18,35 +18,51 @@ def reader(args, fns: List[str], tokenizer, queue: mp.Queue):
     text_pairs = []
     for fn in fns:
         lns = open(fn).readlines()
-        for lineno, ln in enumerate(lns):
-            js = json.loads(ln.strip())
+        jss = list(map(json.loads, lns))
+        num_cands = sum(len(js["candidates"]) for js in jss)
+        for lineno, js in enumerate(jss):
             keys.extend(
-                repeat([fn, len(lns), lineno, js["page"]],
+                repeat([fn, num_cands, lineno, js["page"]],
                        len(js["candidates"])))
             text_pairs.extend([js["query"], cand] for cand in js["candidates"])
         while len(text_pairs) >= args.batch_size:
             _, cands = zip(*text_pairs[-args.batch_size:])
             queue.put([
-                keys[-args.batch_size:], js["query"], cands,
+                keys[-args.batch_size:], text_pairs[-1][0], cands,
                 tokenizer.batch_encode_plus(text_pairs[-args.batch_size:],
                                             padding=True,
                                             truncation=True,
                                             max_length=512,
                                             return_tensors="pt")
             ])
-            del keys[-args.batch_size]
-            del text_pairs[-args.batch_size]
+            del keys[-args.batch_size:]
+            del text_pairs[-args.batch_size:]
+
+    _, cands = zip(*text_pairs[-args.batch_size:])
+    queue.put([
+        keys[-args.batch_size:], text_pairs[-1][0], cands,
+        tokenizer.batch_encode_plus(text_pairs[-args.batch_size:],
+                                    padding=True,
+                                    truncation=True,
+                                    max_length=512,
+                                    return_tensors="pt")
+    ])
+    del keys[-args.batch_size:]
+    del text_pairs[-args.batch_size:]
 
 
 def writer(queue):
     while True:
         try:
+            print(queue.get())
             fn, jsl = queue.get()
+            print(fn)
         except TypeError:
             break
         jsonl = []
         for lineno in sorted(jsl):
             [page, query, *_], *_ = jsl[lineno]
+            print(lineno, page, query[:25])
             _, _, cands, probs = zip(*jsl[lineno])
             jsonl.append({
                 "page": page,
@@ -80,6 +96,7 @@ def run(pid, args, input_queue, output_queue):
             outputs = lm(**inputs.to(device))  # (B * N, 2)
         probs = outputs["logits"].softmax(1)[:, 0]  # (B * N,)
         for key, cand, prob in zip(keys, cands, probs):
+            # print(key, query[:10], cand[:10])
             output_queue.put([key, query, cand, prob.item()])
 
 
@@ -92,6 +109,7 @@ if __name__ == "__main__":
     parser.add_argument("--lm-card",
                         type=str,
                         default="allenai/scibert_scivocab_cased")
+    parser.add_argument("--num-cands", type=int)
     parser.add_argument("--num-readers", type=int)
     parser.add_argument("--num-writers", type=int)
     args = parser.parse_args()
@@ -130,17 +148,21 @@ if __name__ == "__main__":
     jsls = defaultdict(lambda: defaultdict(list))
     cand_cnts = defaultdict(int)
     while num_readers > 0:
+        print(sum(cand_cnts.values()))
         try:
             [fn, num_cands, lineno,
              page], query, cand, prob = output_queue.get()
         except TypeError:
             num_readers -= 1
             continue
+        # print(lineno, page, query[:25])
         jsls[fn][lineno].append([page, query, cand, prob])
         cand_cnts[fn] += 1
         if cand_cnts[fn] == num_cands:
+            # print(fn, cand_cnts[fn], num_cands)
             print(fn)
             upload_queue.put([fn, jsls[fn]])
+            del jsls[fn]
 
     for proc in readers:
         proc.join()

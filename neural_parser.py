@@ -12,6 +12,7 @@ import random
 from typing import *
 
 import torch
+import torch.multiprocessing as torch_mp
 import torch.nn.functional as F
 from transformers import *
 
@@ -21,8 +22,7 @@ from tqdm import tqdm
 chaini = chain.from_iterable
 
 
-def reader(args, queue: mp.Queue, fns: List[str]):
-    tokenizer = AutoTokenizer.from_pretrained(args.lm_card)
+def reader(args, fns: List[str], tokenizer, queue: mp.Queue):
     keys = []
     text_pairs = []
     for fn in fns:
@@ -33,6 +33,7 @@ def reader(args, queue: mp.Queue, fns: List[str]):
                 repeat([fn, len(lns), lineno, js["page"]],
                        len(js["candidates"])))
             text_pairs.extend([js["query"], cand] for cand in js["candidates"])
+        print(f"read {fn}")
         while len(text_pairs) >= args.batch_size:
             _, cands = zip(*text_pairs[-args.batch_size:])
             queue.put([
@@ -45,7 +46,8 @@ def reader(args, queue: mp.Queue, fns: List[str]):
             del text_pairs[-args.batch_size]
 
 
-def estimator(args, device, input_queue: mp.Queue, output_queue: mp.Queue):
+def estimator(pid, args, input_queue: mp.Queue, output_queue: mp.Queue):
+    device = torch.device(f"cuda:{args.gpus[pid]}")
     lm = AutoModelForNextSentencePrediction.from_pretrained(
         args.lm_card).to(device)
     while True:
@@ -53,7 +55,8 @@ def estimator(args, device, input_queue: mp.Queue, output_queue: mp.Queue):
             keys, query, cands, inputs = input_queue.get()
         except TypeError:
             break
-        outputs = lm(**inputs)  # (B * N, 2)
+        with torch.no_grad():
+            outputs = lm(**inputs.to(device))  # (B * N, 2)
         probs = outputs["logits"].softmax(1)[:, 0]  # (B * N,)
         for key, cand, prob in zip(keys, cands, probs):
             output_queue.put([key, query, cand, prob])
@@ -94,44 +97,37 @@ if __name__ == "__main__":
     parser.add_argument("--lm-card",
                         type=str,
                         default="allenai/scibert_scivocab_cased")
-    parser.add_argument("--num-workers", type=int)
+    parser.add_argument("--num-readers", type=int)
     args = parser.parse_args()
 
-    seqs: List[List[str]] = pickle.load(open(args.dat_dir, "rb"))
-    random.shuffle(seqs)
-    train_seqs, dev_seqs = seqs[:args.num_train_items], seqs[args.
-                                                             num_train_items:]
+    fns = glob("inputs/queries.*.json")
 
-    fns = glob("queries.*.json")
+    input_queue = mp.Queue()
+    output_queue = mp.Queue()
 
-    input_queue = mp.Queue
-    output_queue = mp.Queue
-    num_files_per_worker = math.ceil(len(fns) / args.num_workers)
+    num_files_per_worker = math.ceil(len(fns) / args.num_readers)
+    tokenizer = AutoTokenizer.from_pretrained(args.lm_card)
     readers = [
         mp.Process(target=reader,
                    args=[
-                       input_queue, fns[idx * num_files_per_worker:(idx + 1) *
-                                        num_files_per_worker]
+                       args, fns[idx * num_files_per_worker:(idx + 1) *
+                                 num_files_per_worker], tokenizer, input_queue
                    ]) for idx in range(args.num_readers)
     ]
-    for reader in readers:
-        reader.start()
-    estimators = [
-        mp.Process(target=estimator,
-                   args=[
-                       args,
-                       torch.device(f"cuda:{gpu}"), input_queue, output_queue
-                   ]) for gpu in args.gpus
-    ]
-    for estimator in estimators:
-        estimator.start()
-    writer_proc = mp.Process(target=writer, args=[])
+    for proc in readers:
+        proc.start()
 
-    for reader in readers:
-        reader.join()
-    for _ in range(len(estimators)):
+    # torch_mp.spawn(estimator,
+    #                args=[args, input_queue, output_queue],
+    #                nprocs=len(args.gpus))
+    estimator(0, args, input_queue, output_queue)
+
+    writer_proc = mp.Process(target=writer, args=[output_queue])
+    writer_proc.start()
+
+    for proc in readers:
+        proc.join()
+    for _ in range(len(args.gpus)):
         input_queue.put(None)
-    for estimator in estimators:
-        estimator.join()
     output_queue.put(None)
-    writer.join()
+    writer_proc.join()
