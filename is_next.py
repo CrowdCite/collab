@@ -22,14 +22,13 @@ def reader(args, filenames: List[str], queue: mp.Queue):
 
     def put(text_pairs, records, queue):
         _, cands = zip(*text_pairs[-args.batch_size:])
-        queue.put([
-            records[-args.batch_size:], cands,
-            tokenizer.batch_encode_plus(text_pairs[-args.batch_size:],
-                                        padding=True,
-                                        truncation=True,
-                                        max_length=512,
-                                        return_tensors="pt"), kwargs
-        ])
+        inputs = tokenizer.batch_encode_plus(text_pairs[-args.batch_size:],
+                                             padding=True,
+                                             truncation=True,
+                                             max_length=512,
+                                             return_tensors="pt",
+                                             return_token_type_ids=True)
+        queue.put([records[-args.batch_size:], cands, inputs, kwargs])
         del records[-args.batch_size:]
         del text_pairs[-args.batch_size:]
 
@@ -65,21 +64,23 @@ def estimator(args, device, input_queue, output_queue):
 
     while True:
         records, cands, inputs, kwargs = input_queue.get()
+        inputs = inputs.to(device)
+
         with torch.no_grad():
-            outputs = lm(**inputs.to(device))  # (B * N, 2)
+            outputs = lm(**inputs)  # (B * N, 2)
 
         if "bert" in args.lm_card:
-            probs = outputs["logits"].softmax(1)[:, 0]  # (B * N,)
+            scores = outputs["logits"].softmax(1)[:, 0]  # (B * N,)
         elif "gpt" in args.lm_card:
-            input_ids = inputs["input_ids"]
-            logits = outputs["logits"].gather(2, input_ids[:, :,
-                                                           None]).squeeze(2)
-            mask = (input_ids == kwargs["pad_token_id"])
-            logits = logits.masked_fill(mask, 0)
-            probs = logits.sum(1) / (logits.size(1) - mask.sum(1))
+            logits = outputs["logits"].log_softmax(2).gather(
+                2, inputs['input_ids'][:, :, None]).squeeze(2)
+            token_type_ids = inputs['token_type_ids']
+            mask = (token_type_ids
+                    == 1) & (token_type_ids.cumsum(1) <= args.win_size)
+            scores = logits.masked_fill(~mask, 0).sum(1) / mask.sum(1)
 
-        for record, cand, prob in zip(records, cands, probs):
-            output_queue.put([record, cand, prob.item()])
+        for record, cand, score in zip(records, cands, scores):
+            output_queue.put([record, cand, score.item()])
         del records, cands, inputs
 
 
@@ -108,9 +109,10 @@ if __name__ == "__main__":
     parser.add_argument("--num-readers", type=int)
     parser.add_argument("--num-writers", type=int)
     parser.add_argument("--out-dir", type=Path)
+    parser.add_argument("--win-size", type=int)
     args = parser.parse_args()
 
-    filenames = list(args.in_dir.glob("*.jsonl"))
+    filenames = list(args.in_dir.glob("*.json"))
 
     download_queue = mp.Queue()
     input_queue = mp.Queue()
@@ -151,11 +153,11 @@ if __name__ == "__main__":
     }))
     while num_files > 0:
         [filename, num_cands, lineno, page,
-         query], cand, prob = output_queue.get()
+         query], cand, score = output_queue.get()
 
         js = jsons[filename][lineno]
         js.update({"page": page, "query": query})
-        js["candidates"].append([cand, prob])
+        js["candidates"].append([cand, score])
 
         num_cands_by_file[filename] += 1
         if num_cands_by_file[filename] == num_cands:
