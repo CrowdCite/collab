@@ -26,3 +26,7 @@ Setup is done by using Conda (miniconda - no default packages are included). The
     $ node build/mergePL.js <dir1> <dir2> ...
 
 Output is in merged/timestamp/\*.
+
+# Run `is_next.py`
+
+    $ python is_next.py --in-dir inputs/ --out-dir outputs/ --lm-card gpt2 --batch-size 16 --gpus $(seq 0 0) --num-readers 1 --num-writers 1 --win-size 5
