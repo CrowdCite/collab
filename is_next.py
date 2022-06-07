@@ -26,12 +26,14 @@ def reader(args, filenames: List[str], queue: mp.Queue):
                                                  return_tensors='pt')
         elif 'gpt' in args.lm_card:
             tokenizer.pad_token = tokenizer.eos_token
-            inputs = tokenizer.batch_encode_plus(text_pairs[-args.batch_size:],
-                                                 padding=True,
-                                                 truncation=True,
-                                                 max_length=512,
-                                                 return_tensors='pt',
-                                                 return_token_type_ids=True)
+            inputs = tokenizer.batch_encode_plus(
+                text_pairs[-args.batch_size:],
+                padding=True,
+                truncation=True,  # TODO
+                max_length=512,
+                return_tensors='pt',
+                return_attention_mask=False,
+                return_token_type_ids=True)
 
         queue.put([records[-args.batch_size:], cands, inputs])
         del records[-args.batch_size:]
@@ -47,7 +49,9 @@ def reader(args, filenames: List[str], queue: mp.Queue):
             records.extend(
                 repeat([filename, num_cands, lineno, js['page'], js['query']],
                        len(js['candidates'])))
-            text_pairs.extend([js['query'], cand] for cand in js['candidates'])
+            text_pairs.extend(
+                [f'{tokenizer.bos_token} {js["query"]}', f' {cand}']
+                for cand in js['candidates'])
         while len(text_pairs) >= args.batch_size:
             put(text_pairs, records, queue)
 
@@ -59,13 +63,15 @@ def reader(args, filenames: List[str], queue: mp.Queue):
 
 
 def estimator(args, device, input_queue, output_queue):
+    torch.set_printoptions(precision=3, sci_mode=False)
+
     if 'bert' in args.lm_card:
         lm = AutoModelForNextSentencePrediction.from_pretrained(args.lm_card)
     elif 'gpt' in args.lm_card:
         lm = lm = GPT2LMHeadModel.from_pretrained(args.lm_card)
     else:
         raise ValueError()
-    lm = lm.to(device)
+    lm = lm.eval().to(device)
 
     while True:
         records, cands, inputs = input_queue.get()
@@ -77,16 +83,21 @@ def estimator(args, device, input_queue, output_queue):
         elif 'gpt' in args.lm_card:
             inputs = inputs.to(device)
             with torch.no_grad():
-                outputs = lm(**inputs)
-                token_type_ids = inputs['token_type_ids']
+                token_type_ids = inputs.pop('token_type_ids')
+                outputs = lm(inputs['input_ids'])
                 cumsum = token_type_ids.cumsum(1)
-                mask = F.pad((0 < cumsum) & (cumsum <= args.win_size),
+                mask = F.pad((token_type_ids == 1) & (cumsum <= args.win_size),
                              [-1, 1, 0, 0])
+                # scores = outputs['logits'].log_softmax(2).gather(
+                #     2,
+                #     F.pad(inputs['input_ids'],
+                #           [-1, 1, 0, 0])[:, :, None]).squeeze(2).masked_fill(
+                #               ~mask, 0).sum(1) / mask.sum(1)
+                input_ids = F.pad(inputs['input_ids'], [-1, 1, 0, 0])[:, :,
+                                                                      None]
                 scores = outputs['logits'].log_softmax(2).gather(
-                    2,
-                    F.pad(inputs['input_ids'],
-                          [-1, 1, 0, 0])[:, :, None]).squeeze(2).masked_fill(
-                              ~mask, 0).sum(1) / mask.sum(1)
+                    2, input_ids).squeeze(2).masked_fill(
+                        ~mask, 0).sum(1) / mask.sum(1)
 
         for record, cand, score in zip(records, cands, scores):
             output_queue.put([record, cand, score.item()])
