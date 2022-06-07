@@ -110,7 +110,7 @@ def writer(args, queue):
             filename, jsonl = queue.get()
         except TypeError:
             break
-        open(args.out_dir / filename.name, 'w').write('\n'.join(
+        open(str(filename).replace('queries', 'results'), 'w').write('\n'.join(
             map(partial(json.dumps, ensure_ascii=False),
                 (jsonl[lineno] for lineno in sorted(jsonl)))))
 
@@ -122,17 +122,16 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch-size', type=int)
     parser.add_argument('--gpus', type=int, nargs='+')
-    parser.add_argument('--in-dir', type=Path)
+    parser.add_argument('--dir', type=Path)
     parser.add_argument('--lm-card',
                         type=str,
                         default='allenai/scibert_scivocab_cased')
     parser.add_argument('--num-readers', type=int)
     parser.add_argument('--num-writers', type=int)
-    parser.add_argument('--out-dir', type=Path)
     parser.add_argument('--win-size', type=int)
     args = parser.parse_args()
 
-    filenames = list(args.in_dir.glob('*.json'))
+    filenames = list(args.dir.glob('*.*.pdf/scale-1x/base/queries.jsonl'))
 
     download_queue = mp.Queue()
     input_queue = mp.Queue()
