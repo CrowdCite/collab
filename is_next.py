@@ -1,3 +1,7 @@
+'''
+python is_next.py --dir 2201/2201/ --lm-card gpt2 --batch-size 4 --gpus $(seq 0 7) --num-readers 16 --num-writers 16 --win-size 4
+'''
+
 import argparse
 from collections import *
 from functools import *
