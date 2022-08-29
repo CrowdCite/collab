@@ -108,3 +108,4 @@ build/
 examples/*.out.tex
 
 merged/
+timeouts/
