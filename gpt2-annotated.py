@@ -83,7 +83,12 @@ with torch.no_grad():
     # `mask` is a tensor with the same shape as input_ids where each element in
     # the canidate that fits within the window is True, and all other elements
     # are False. This masks out only the tokens whose logits are considered when
-    # computing the probability that they follow the query.
+    # computing the probability that they follow the query. The pad operation
+    # strips the first element, and adds a False at the end. This allows the
+    # mask to account for the removal of the bos_token in the padded variable
+    # (defined next), as well as mask out the final value where the "next token"
+    # is artificially set to the 0th index, and whose log probability is
+    # extraneous.
     mask = F.pad((token_type_ids == 1) & (cumsum <= win_size),
                  [-1, 1])
     print(f'mask ${mask.shape}: {mask}')
